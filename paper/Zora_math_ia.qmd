@@ -1,0 +1,437 @@
+---
+title: "Analyzing the Influence of Player Performance Metrics on NBA MVP Voting Scores"
+author: 
+  - Ruiyi Liu
+thanks: "Code and data are available at: []()."
+date: today
+date-format: long
+abstract: "This study used linear regression to analyze the impact of NBA player performance metrics on MVP voting scores. Using data from the 2016 - 2019 seasons, key predictors such as scoring, assists, rebounding, and advanced metrics were analyzed. Regression models were trained and validated on separate datasets and diagnostic checks were performed to ensure compliance with linear regression assumptions. The analysis identified key performance metrics that influence MVP results and demonstrated the reliability of the model. These findings provide insights into the evaluation criteria for the NBA MVP award and highlight the role of analytics in sports decision-making."
+format:
+  pdf:
+    latex_engine: xelatex
+prefer-html: true
+number-sections: true
+bibliography: references.bib
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r, warning=FALSE, message=FALSE, include=FALSE}
+#### Loading Packages ####
+
+library(here)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(gridExtra)
+library(car)
+library(ggplot2)
+```
+
+```{r, warning=FALSE, message=FALSE, include=FALSE}
+#### Loading Raw Data ####
+nba_data <- read.csv(here::here("data/raw_data/nba_final.csv"))
+```
+
+# Introduction
+In basketball analytics, player performance metrics are critical in assessing individual contributions and overall value to the team.The NBA Most Valuable Player (MVP) award is a prestigious award based on a combination of subjective voting and objective player statistics. The focus of this study is to understand how player-specific performance metrics affect MVP voting results. Using a dataset containing NBA player statistics from the 2016 through 2019 seasons, we develop and evaluate statistical models to identify key predictors of MVP scores.
+
+The purpose of this analysis is twofold: first, to explore the relationship between player metrics (e.g., points, assists, rebounds, and other performance metrics) and MVP voting scores; and second, to validate the stability and generalizability of these models using training and test datasets. By analyzing the statistical significance of these predictors and model assumptions, we aim to gain a deeper understanding of the factors that drive MVP voting decisions.
+
+This report outlines the methods used to clean and preprocess the data, the steps taken to fit the multiple linear regression models, and the validation process to ensure the reliability of the results. The results of this analysis provide valuable insights into the evaluation criteria for MVP awards and the role of advanced basketball metrics in shaping these decisions.
+
+
+# Data Overview
+
+## Measurement
+
+The dataset comprises NBA player statistics from the 2016 to 2019 seasons, encompassing various performance metrics and player information.
+
+Key variables include total points `scored (PTS)`, `assists (AST)`, `rebounds (TRB)`, `minutes played (MP)`, and `field goal percentage (FG%)`.These metrics are standard in basketball analytics, providing insights into a player's scoring ability, playmaking skills, effectiveness in gaining possession, playing time, and shooting efficiency.
+
+The dataset also includes the number of games played (G), which is essential for calculating per-game averages, allowing for standardized comparisons across players.
+Additionally, the dataset contains the `Score` variable, representing the player's MVP voting results, serving as the dependent variable in our analysis.
+These measurements are crucial for evaluating player performance and understanding the factors influencing MVP voting outcomes.
+
+**Note:** The dataset is sourced from Kaggle and includes player statistics from the 2016 to 2019 NBA seasons.
+
+## Data Cleaning
+
+We used the`R`programming language [@citeR], the `here` package [@here2023], the `dplyr` package [@dplyr2023], the `ggplot2` package [@ggplot2], the `knitr` package [@knitr2023], the `kableExtra` package [@kableExtra2023], the `car` package [@car2023], the `gridExtra` package [@gridExtra2023] to clean the data, plot the graphs and tables, fit the models. 
+
+```{r, warning=FALSE, message=FALSE, include=FALSE}
+#### Cleaning Data ####
+
+# Cleaned dataset with selected variables
+cleaned_data <- nba_data %>%
+  dplyr::select(
+    Score,
+    Age,
+    PTS, 
+    AST, 
+    TRB, 
+    MP,
+    FT,
+    FG, 
+    Rk, 
+    X3P,
+    X2P, 
+    Role,
+    Salary, 
+    G, 
+    TOV, 
+    mean_views
+  )
+
+cleaned_data <- cleaned_data |>
+  na.omit()
+
+# View the cleaned dataset
+head(cleaned_data)
+
+
+write.csv(cleaned_data, here::here("data/cleaned_data/cleaned_data.csv"))
+```
+
+Then we select the variables that we think are important in raw data to form cleaned data.
+Instead of selecting variables such as player names and ids that are not useful for building the model, we chose age, salary, and data about on-field performance as cleaned data.
+
+We split the cleaned dataset into 2 part, train data and test data, each part consists $50\%$ of the cleaned data. We will fit a model using the train data, and do the model validation using the model fitted by the test data.
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+#### Spliting train and test ####
+
+data <- cleaned_data
+
+# Split data into training and test sets
+set.seed(527)
+rows <- sample(1:nrow(data), 704, replace = FALSE)
+train <- data[rows, ]
+test <- data[-rows, ]
+```
+
+Below is an overview of the cleaned data, only specific variables are secleted to be shown in the [@tbl-data-overview].
+
+```{r, warning=FALSE, echo=FALSE}
+#| label: tbl-data-overview
+#| tbl-cap: The cleaned data overview
+
+
+# Subset the dataset for demonstration (first 10 rows and selected columns)
+summary_data <- data[1:10, c("Score", "Age", "X3P",  
+                                     "mean_views", "Rk", 
+                                     "Salary", "Role")]
+
+# Generate the data table
+summary_data %>%
+  kable(
+    format = "html",
+    caption = "Summary of Selected NBA Player Data",
+    col.names = c("Score", "Age", "X3P", "mean_views", "Rk", "Salary", "Role")  # Match column count
+  ) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  column_spec(1, bold = TRUE, color = "blue")  # Make the first column bold and blue
+
+```
+
+# Method
+We first split the cleaned dataset into 2 parts by $50\% : 50\%$, which are train data and test data. Using the train data to fit the model. We use all the variables in the train data to fit out Model 1, and selected the significant predictors to fit the Model 2, and we randomly select 2 predictors in the Model 2 to fit the Model 3, and apply partial F-test on the Model 2 and Model 3, this is to check if the Model 2 can be simplified. If the model can not be simplified, the Model 2 is our final model. Finally, we use all the predictors in the Model 2 and the test data to fit the Model 4, and then make model vailidation on these 2 models. 
+
+# Model
+Linear regression modeling is a statistical method for modeling the relationship between a dependent variable (response) and one or more independent variables (predictors). It assumes that the relationship between the variables is linear and estimates the coefficients of the linear equation that best predicts the response variable based on the predictors. The general form of the model is:
+
+$$y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \dots + \beta_n x_n +\epsilon$$
+where: 
+
+- $y$: the response variable. 
+
+- $x_1 \dots x_n$: the predictors. 
+
+- $\beta_0$: the intercept. 
+
+- $\beta_1 \dots \beta_n$: the coefficients of the predictors. 
+
+- $\epsilon$: the random error, this should be normally distribute [@montgomery2012linear] [@james2013introduction]. 
+
+And here are 3 assumption on the linear regression model, which are: 
+
+- **Linearity**: It is assumed that $y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \dots + \beta_n x_n +\epsilon$, indicating a linear relationship between $Y_i$ and $x_i$.
+- **Homoscedasticity**: It is assumed that the variance of $Y_i$, denoted as $\text{Var}(Y_i)$, does not depend on $x_i$.
+- **Normality**: It is assumed that the residuals follow a normal distribution.
+
+```{r, warning=FALSE, echo=FALSE, message=FALSE}
+attach(train)
+# Adjust margins to make space for plots
+par(mar = c(4, 4, 2, 1))  # Bottom, left, top, right margins
+par(mfrow = c(3, 2))      # 3 rows and 2 columns of plots
+
+# Plot histograms
+hist(Score, breaks = 10, main = "Score", col = "blue")
+hist(Age, breaks = 10, main = "Age")
+hist(Salary, breaks = 10, main = "Salary")
+hist(Rk, breaks = 10, main = "Rank")
+```
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+#### Model 1 ####
+
+#### include = TRUE to see the output ####
+
+m1 <- lm(Score ~., data = train)
+summary_m1 <- summary(m1)
+summary_m1
+coefficients <- summary_m1$coefficients
+
+```
+
+$$
+\begin{aligned}
+\hat{\text{Score}} = & \ 115.8 - 0.3592(\text{Age}) + 15.14(\text{PTS}) \\
+& - 1.516(\text{AST}) - 1.503(\text{TRB}) - 0.05607(\text{MP}) \\
+& - 19.04(\text{FT}) - 54.36(\text{FG}) + 0.03302(\text{Rk}) \\
+& + 7.234(\text{X3P}) + 19.28(\text{X2P}) + 13.82(\text{RoleFront}) \\
+& + 5.409 \times 10^{-9}(\text{Salary}) - 3.491(\text{G}) \\
+& + 2.436(\text{TOV}) - 0.003031(\text{mean\_views})
+\end{aligned}
+$$
+
+
+From the math we learnt, if the p-value of the variable is smaller than 0.05, then that variable is significant.
+We first fit the models with all the variables in the train data, from the summary table of the Model 1, we can see that the variables **TRB**, **Rk**, **Role**, **G** and **mean_views** are significant.
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+#### Model 2 ####
+
+#### include = TRUE to see the output ####
+
+m2 <- lm(Score ~ TRB + Rk + Role + G + mean_views, data = train)
+summary_m2 <- summary(m2)
+summary_m2
+```
+
+Next, we fit our Model 2 by the significant predictor we selected in the Model 1, the Model 2 is shown below:
+
+$$
+\begin{aligned}
+\hat{\text{Score}} = & \ 103.4738121 - 5.1609752(\text{TRB}) + 0.0316097(\text{Rk}) + 21.7089780(\text{RoleFront}) \\
+& - 0.4479400(\text{G}) - 0.0053988(\text{mean\_views})
+\end{aligned}
+$$
+
+Then we can check if there is any collinearity between the predictors we selected.
+The collinearity in statistic refers to the predictors is linear dependent [@wikipedia_multicollinearity].
+This may leads to the unstable coefficient, difficulty in identifying significant predictors, redundancy among variables and so on.
+
+The collinearity can be checked by compute the VIF (Variance inflation factor) of the predictors in the Model 2.
+In statistics, the variance inflation factor (VIF) measures how much the variance of a parameter estimate increases when other predictors are included in the model compared to when the model contains only that parameter.
+The formula for VIF is:
+
+$$\text{VIF}_{i} = \frac{1}{1-R^2_i}$$
+where $R^2_i$ is the coefficient of determination [@wikipedia_vif]. 
+
+We can see that all the VIF values is less than 5, so there is no collinearity between all the predictors.So we maintain our Model 2.
+
+```{r, message=FALSE, echo=FALSE}
+vif_values <- vif(m2)
+vif_table <- data.frame(
+  Predictor = names(vif_values),
+  VIF_Value = round(as.numeric(vif_values), 3) # Round to 3 decimal places
+)
+vif_table
+```
+
+```{r, message=FALSE, include=FALSE}
+#### Model 3 ####
+
+#### include = TRUE to see the output ####
+
+m3 <- lm(Score ~ G + Rk, data = train)
+summary_m3 <- summary(m3)
+summary_m3
+
+anova(m2, m3)
+```
+
+Next, we need to check if the model can be simplified, we randomly pick 2 variables **G** and **Rk** to fit our Model 3. We apply the partial F-test on Model 2 and Model 3 to see if this model can be simplify, here is the Model 3:
+
+$$
+\begin{aligned}
+\hat{\text{Score}} = & \ 108.735967 + 0.028256 (\text{Rk}) - 0.749699(\text{G})
+\end{aligned}
+$$
+
+A partial F-test is used to assess whether there is a statistically significant difference between a full regression model and a simpler, nested version of the same model. We will have 2 hypothesis, which are
+
+$\text{H}_0$: The additional predictors in the full model do not provide a significant improvement in the model's fit.
+
+$\text{H}_A$: The additional predictors in the full model provide a significant improvement in the model's fit.
+
+If the p-value in the partial F-test is less than 0.05, we need to reject the null hypothesis $\text{H}_0$. In this case [@tbl-f-test], the p-value is less than 0.05, so we reject the null hypothesis $\text{H}_0$ and choose our Model 2. 
+
+```{r, message=FALSE, echo=FALSE}
+#| label: tbl-f-test
+#| tbl-cap: The Partial F Test Outcome
+
+anova_results <- data.frame(
+  Model = c("Model 2", "Model 3"),
+  Residual_DF = c(698, 701),
+  RSS = c(722336, 918333),
+  Df = c(NA, -3),
+  Sum_of_Squares = c(NA, -195997),
+  F_Statistic = c(NA, 63.131),
+  P_Value = c(NA, "< 2.2e-16")
+)
+
+# Generate the kable table
+anova_results %>%
+  kable(
+    format = "html",
+    caption = "Summary of ANOVA Results Comparing Two Models",
+    col.names = c("Model", "Residual DF", "RSS", "Df", "Sum of Squares", "F-Statistic", "P-Value")
+  ) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+```
+
+So we finally choose the Model 3 to be our final model. 
+
+## Model Quality
+Although we successfully selected our current model, our model needs to meet the conditions to be a good model, and these conditions are
+\begin{center}
+Condition 1: Linearity
+
+Conditon 2: Normality of Residuals, 
+\end{center}
+and we will examine them one by one. 
+
+We first check the Condition 1, the Condition 1 can be checked by the following plot [@fig-conditon1-m2]. 
+
+```{r,message=FALSE, echo=FALSE,warning=FALSE,fig.height=3}
+#| fig-cap: Plot for checking Condition 1 (Model 2)
+#| label: fig-conditon1-m2
+
+#### C1 ####
+
+plot(
+  fitted(m2),                    # Fitted values
+  resid(m2),                     # Residuals
+  main = "Residuals vs Fitted Values", # Plot title
+  xlab = "Fitted Values",           # X-axis label
+  ylab = "Residuals",               # Y-axis label
+  pch = 20,                         # Point style
+  col = "Black"                      # Point color
+)
+abline(h = 0, col = "red", lwd = 2) # Horizontal line at 0 for reference
+
+```
+The linearity assumption of the model was assessed using a Residuals vs. Fitted Values plot, where residuals are plotted against the predicted values. The residuals appear randomly scattered around the horizontal red line at $y = 0$, indicating that the relationship between the predictors and the response variable is approximately linear. While slight fanning at higher fitted values suggests potential heteroscedasticity, this does not violate linearity. A few outliers are present and may require further investigation. Overall, the plot confirms that the linearity assumption is satisfied.
+
+Now check for the Condition 2. In the [@fig-conditon2-m2], we choose all the numerical variables in train data. By the [@fig-conditon2-m2], we can see that there is no linear pattern between these variables, so our Model 2 satisfies the condition 2. 
+
+```{r,message=FALSE, echo=FALSE,warning=FALSE,fig.height=3}
+#| fig-cap: Plot for checking Condition 2 (Model 2)
+#| label: fig-conditon2-m2
+
+#### Check C2 ####
+pairs(train[,c(5, 9, 14, 16)])
+```
+A residual plot is a scatterplot that displays the residuals on the y-axis and the fitted values (predicted values) or another variable on the x-axis. It is used to evaluate the assumptions of a regression model, including linearity, homoscedasticity (constant variance), and independence of residuals. A good residual plot shows no clear patterns, clusters, or trends, indicating that the model's assumptions are likely met [@james2013introduction]. The residual plot can check the linearity, homoscedasticity, normality, which are
+
+- **Linearity**: Determines if there is a straight-line relationship between the `Score` and its predictors.
+
+- **Homoscedasticity**: Checks whether the variance of the residuals remains consistent across all levels of the predictors.
+
+- **Outliers**:  Identifies any observations of the `Score` that differ substantially from the predicted values of `Score`.
+
+The residual plot [@fig-resi-plot] revealed no noticeable patterns, clusters, or evidence of heteroscedasticity, confirming that the assumptions of linearity, independence, and constant variance were met.
+
+```{r,message=FALSE, echo=FALSE,warning=FALSE,fig.height=4}
+#| label: fig-resi-plot
+#| fig-cap: The Residual Plot of the Model 2
+
+#### Residual Plot ####
+
+# Calculate residuals and fitted values from the model
+residuals <- resid(m2)  # Residuals (Observed - Predicted)
+fitted_values <- fitted(m2)  # Fitted (Predicted) values
+
+# Plot residuals vs fitted values
+resi <- plot(fitted_values, residuals,
+     xlab = "Fitted Values",      # Label for x-axis
+     ylab = "Residuals",          # Label for y-axis
+     main = "Residual Plot",      # Add a title
+     pch = 19)                   # Use filled circles for points
+```
+A Q-Q (Quantile-Quantile) plot is a graphical tool used to assess whether a dataset follows a specified theoretical distribution, typically a normal distribution. It plots the quantiles of the dataset against the quantiles of the theoretical distribution. If the data follows the specified distribution, the points in the Q-Q plot will align closely along a 45-degree reference line. Deviations from this line indicate departures from the assumed distribution, such as skewness or heavy tails [@pennstate_qqplot].
+
+
+```{r,message=FALSE, echo=FALSE,warning=FALSE,fig.height=4}
+#| label: fig-qqplot
+#| fig-cap: The QQ-Plot of the Model 2
+
+#### QQ Plot ####
+
+# QQ plot for residuals
+qqnorm(resid(m2))
+qqline(resid(m2))
+```
+The Q-Q plot [@fig-qqplot] demonstrated that the residuals aligned closely with the straight line, suggesting that they were approximately normally distributed.
+
+## Model Validation
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+#### Model 4 ####
+
+#### include = TRUE to see the output ####
+
+m4 <- lm(Score ~ TRB + Rk + Role + G + mean_views, data = test)
+summary_m4 <- summary(m4)
+summary_m4
+```
+We use the test data and the same predictors in the Model 2 to fit our Model 4, the [@tbl-compare] shows the coefficient compare table of the Model 2 and the Model 4. we can see that there is slightly difference between the coefficients of the predictors, and all the predictors in the Model 4 are significant. This means our model can work well even if we fit it on the different datasets, means our coefficients are stable, here is the Model 4: 
+
+$$
+\begin{aligned}
+\hat{\text{Score}} = & \ 99.6246334 - 5.8121747(\text{TRB}) + 0.0355633(\text{Rk}) + 25.6532125(\text{RoleFront}) \\
+& - 0.4656068(\text{G}) - 0.0034080(\text{mean\_views})
+\end{aligned}
+$$
+
+```{r,message=FALSE, echo=FALSE,warning=FALSE,fig.height=4}
+#| label: tbl-compare
+#| tbl-cap: Summary of the coefficients and metrics for the training and testing models
+
+# Extract estimates
+model2_estimates <- summary(m2)$coefficients[, 1]
+model4_estimates <- summary(m4)$coefficients[, 1]
+
+# Create a comparison table
+comparison_table <- data.frame(
+  Variable = names(model2_estimates),
+  `Model 2 Estimate (Train)` = model2_estimates,
+  `Model 4 Estimate (Test)` = model4_estimates
+)
+
+# Generate a kable table
+comparison_table %>%
+  kable(
+    format = "html",
+    caption = "Comparison of Coefficients for Model 2 and Model 4",
+    col.names = c("Variable", "Model 2 Estimate (Train)", "Model 4 Estimate (Test)")
+  ) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+# Conclusion
+
+This paper uses linear regression modeling to explore the relationship between NBA player performance indicators and MVP voting scores. Key predictors, such as total rebounds, rankings, roles, games, and average viewpoints, were identified as significant factors influencing MVP voting results. The study utilized a robust methodology that included data cleaning, training and test dataset segmentation, and model validation. Both residual and diagnostic plots confirmed that the model satisfied the assumptions of linear regression, including linearity, residual normality, and independence.
+
+The stability and generalizability of the final model is demonstrated by consistent results on both the training and test datasets. Significant predictors in the training model remained valid in the test model, enhancing the reliability of the model. In addition, the partial f-test validates the necessity of including key predictors and rejects any simplification of the final model.
+
+While these results provide valuable insights into the factors that influence MVP voting, there are some limitations. The dataset only covers the 2016-2019 seasons and may not fully capture changes in player evaluation criteria over time. Additionally, the subjective nature of MVP voting introduces an element of variability that cannot be fully explained by statistical models. Future research could expand the dataset to include more seasons and explore nonlinear relationships or machine learning techniques to enhance predictive power.
+
+Overall, this study highlights the importance of advanced analytics in understanding sports decision-making and contributes to the broader field of basketball performance assessment.
+
+\newpage
+# Reference
